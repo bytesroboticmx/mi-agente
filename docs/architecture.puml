@@ -1,0 +1,131 @@
+@startuml
+!define RECTANGLE class
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #fafafa
+skinparam component {
+    BackgroundColor<<core>> #e3f2fd
+    BackgroundColor<<llm>> #fff3e0
+    BackgroundColor<<tools>> #e8f5e9
+    BackgroundColor<<memory>> #fce4ec
+    BackgroundColor<<ui>> #f3e5f5
+    BackgroundColor<<config>> #ede7f6
+    BorderColor<<core>> #1976d2
+    BorderColor<<llm>> #f57c00
+    BorderColor<<tools>> #388e3c
+    BorderColor<<memory>> #c2185b
+    BorderColor<<ui>> #7b1fa2
+    BorderColor<<config>> #512da8
+}
+
+package "mi-agente" {
+    
+    package "CLI Layer" <<ui>> {
+        [main.py\n(Typer App)] as Main
+        [config.py commands] as ConfigCmd
+        [tools.py commands] as ToolsCmd
+        [sessions.py commands] as SessionsCmd
+        [chat command] as ChatCmd
+        [run command] as RunCmd
+        [completion command] as CompletionCmd
+    }
+    
+    package "Core Agent" <<core>> {
+        [agent.py\nAgent class] as Agent
+        [AgentConsole\n(output.py)] as Console
+        [StreamingContext] as Streaming
+        [SpinnerContext] as Spinner
+    }
+    
+    package "LLM Providers" <<llm>> {
+        interface LLMClient <<interface>>
+        [llm_openai.py\nOpenAIClient] as OpenAI
+        [llm_anthropic.py\nAnthropicClient] as Anthropic
+        [llm_ollama.py\nOllamaClient] as Ollama
+        [create_llm_client()] as Factory
+    }
+    
+    package "Tools System" <<tools>> {
+        interface Tool <<interface>>
+        [ToolRegistry] as Registry
+        [ToolResult] as ToolResult
+        
+        package "Filesystem Tools" {
+            [ReadFile] as ReadFile
+            [WriteFile] as WriteFile
+            [ListDir] as ListDir
+            [Glob] as Glob
+            [Grep] as Grep
+        }
+        
+        package "System Tools" {
+            [ShellCommand] as Shell
+        }
+    }
+    
+    package "Memory & Context" <<memory>> {
+        [ConversationStore\n(SQLite)] as Store
+        [ContextManager] as ContextMgr
+        [ConversationSession] as Session
+    }
+    
+    package "Configuration" <<config>> {
+        [Settings\n(Pydantic BaseModel)] as Settings
+        [get_settings()\n(lru_cache)] as GetSettings
+        [.env loader] as EnvLoader
+    }
+}
+
+' Relationships
+
+Main --> Agent : creates
+Main --> ConfigCmd : invokes
+Main --> ToolsCmd : invokes
+Main --> SessionsCmd : invokes
+Main --> ChatCmd : invokes
+Main --> RunCmd : invokes
+Main --> CompletionCmd : invokes
+
+Agent --> Console : uses
+Agent --> Streaming : uses
+Agent --> Spinner : uses
+Agent --> Settings : depends
+Agent --> Registry : uses
+Agent --> Store : uses
+Agent --> ContextMgr : uses
+Agent --> LLMClient : depends
+
+Factory --> LLMClient : implements
+OpenAI -up-|> LLMClient
+Anthropic -up-|> LLMClient
+Ollama -up-|> LLMClient
+
+Registry --> Tool : manages
+ReadFile -up-|> Tool
+WriteFile -up-|> Tool
+ListDir -up-|> Tool
+Glob -up-|> Tool
+Grep -up-|> Tool
+Shell -up-|> Tool
+Registry --> ToolResult : returns
+
+Store --> Session : creates/loads
+ContextMgr --> Agent : called by
+ContextMgr --> LLMClient : uses for summary
+
+GetSettings --> Settings : returns
+GetSettings --> EnvLoader : uses
+
+ConfigCmd --> Settings : reads/writes
+ConfigCmd --> EnvLoader : uses
+
+' Data flow notes
+note right of Agent : Core loop:\n1. User input\n2. LLM call (with tools)\n3. Execute tool calls\n4. LLM call (with results)\n5. Return response
+
+note right of Store : SQLite DB:\n~/.mi-agente/memory/\nconversations.db\n\nTables: sessions, messages
+
+note right of ContextMgr : Auto-summary when\ntokens > threshold:\n- Keep system + summary + last N\n- Uses LLM to generate summary
+
+note bottom of Factory : Factory pattern\nbased on settings.llm_provider
+
+@enduml

@@ -1,0 +1,62 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Memory directory (runtime data)
+.mi-agente/
+*.db
+*.sqlite
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+
+# Type checking
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
+*.whl
+*.tar.gz
+
+# PyInstaller
+*.spec
+
+# Local development
+*.local

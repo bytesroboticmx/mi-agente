@@ -1,0 +1,321 @@
+@startuml
+!define CLASS class
+
+skinparam class {
+    BackgroundColor<<core>> #e3f2fd
+    BackgroundColor<<llm>> #fff3e0
+    BackgroundColor<<tools>> #e8f5e9
+    BackgroundColor<<memory>> #fce4ec
+    BackgroundColor<<config>> #ede7f6
+    BackgroundColor<<ui>> #f3e5f5
+    BorderColor<<core>> #1976d2
+    BorderColor<<llm>> #f57c00
+    BorderColor<<tools>> #388e3c
+    BorderColor<<memory>> #c2185b
+    BorderColor<<config>> #512da8
+    BorderColor<<ui>> #7b1fa2
+    ArrowColor #666
+}
+
+package "mi_agente.config" <<config>> {
+    CLASS Settings {
+        + llm_provider: Literal["openai","anthropic","ollama"]
+        + model_name: str
+        + api_key: SecretStr
+        + base_url: str?
+        + temperature: float
+        + max_tokens: int
+        + system_prompt: str
+        + working_dir: Path
+        + tool_timeout: int
+        + confirm_dangerous_tools: bool
+        + memory_enabled: bool
+        + memory_dir: Path
+        + theme: Literal["default","dark","light"]
+        + get_api_key() str
+    }
+    
+    CLASS GetSettings {
+        + get_settings(): Settings
+        + reload_settings(): Settings
+    }
+    
+    GetSettings ..> Settings : returns
+}
+
+package "mi_agente.llm" <<llm>> {
+    INTERFACE LLMClient {
+        + complete(messages, tools, stream) LLMResponse | Iterator
+        + acomplete(messages, tools, stream) LLMResponse | AsyncIterator
+        + count_tokens(messages) int
+    }
+    
+    CLASS LLMResponse {
+        + content: str?
+        + tool_calls: List[dict]?
+        + usage: dict?
+        + model: str?
+        + finish_reason: str?
+    }
+    
+    CLASS Message {
+        + role: str
+        + content: str?
+        + tool_calls: List[dict]?
+        + tool_call_id: str?
+        + name: str?
+        + to_openai() dict
+        + to_anthropic() dict
+    }
+    
+    CLASS ToolSpec {
+        + name: str
+        + description: str
+        + parameters: dict
+        + to_openai() dict
+        + to_anthropic() dict
+    }
+    
+    CLASS OpenAIClient {
+        - client: OpenAI
+        + complete() Iterator[LLMResponse]
+        + _stream_complete() Iterator[LLMResponse]
+        + count_tokens() int
+    }
+    
+    CLASS AnthropicClient {
+        - client: Anthropic
+        + complete() Iterator[LLMResponse]
+        + _stream_complete() Iterator[LLMResponse]
+        + count_tokens() int
+    }
+    
+    CLASS OllamaClient {
+        - client: httpx.Client
+        + complete() Iterator[LLMResponse]
+        + _stream_complete() Iterator[LLMResponse]
+        + count_tokens() int
+    }
+    
+    LLMClient <|-- OpenAIClient
+    LLMClient <|-- AnthropicClient
+    LLMClient <|-- OllamaClient
+    
+    CLASS LLMFactory {
+        + create_llm_client(settings) LLMClient
+    }
+    
+    LLMFactory ..> OpenAIClient
+    LLMFactory ..> AnthropicClient
+    LLMFactory ..> OllamaClient
+}
+
+package "mi_agente.tools" <<tools>> {
+    INTERFACE Tool {
+        + name: str
+        + description: str
+        + parameters: dict
+        + dangerous: bool
+        + timeout: int
+        + execute(**kwargs) ToolResult
+        + validate_args(args) (bool, str?)
+        + to_openai_format() dict
+        + to_anthropic_format() dict
+    }
+    
+    CLASS ToolResult {
+        + success: bool
+        + content: str
+        + error: str?
+        + metadata: dict?
+    }
+    
+    CLASS ToolRegistry {
+        - _tools: Dict[str, Tool]
+        + register(tool)
+        + unregister(name)
+        + get(name) Tool?
+        + list() List[Tool]
+        + get_openai_tools() List[dict]
+        + get_anthropic_tools() List[dict]
+        + execute(name, args, confirm) ToolResult
+    }
+    
+    CLASS ReadFile {
+        + execute(path, offset, limit) ToolResult
+    }
+    
+    CLASS WriteFile {
+        + execute(path, content, append) ToolResult
+    }
+    
+    CLASS ListDir {
+        + execute(path, recursive, show_hidden) ToolResult
+    }
+    
+    CLASS Glob {
+        + execute(pattern, root) ToolResult
+    }
+    
+    CLASS Grep {
+        + execute(pattern, path, include) ToolResult
+    }
+    
+    CLASS ShellCommand {
+        + execute(command, cwd, timeout) ToolResult
+    }
+    
+    Tool <|-- ReadFile
+    Tool <|-- WriteFile
+    Tool <|-- ListDir
+    Tool <|-- Glob
+    Tool <|-- Grep
+    Tool <|-- ShellCommand
+    
+    ToolRegistry o-- Tool : manages
+    ToolRegistry ..> ToolResult : returns
+}
+
+package "mi_agente.memory" <<memory>> {
+    CLASS ConversationStore {
+        - db_path: Path
+        + create_session(name, model, provider, system_prompt) ConversationSession
+        + save_messages(session_id, messages)
+        + load_session(session_id) ConversationSession?
+        + load_messages(session_id) List[Message]
+        + list_sessions(limit) List[ConversationSession]
+        + delete_session(session_id) bool
+        + update_session_metadata(session_id, metadata)
+    }
+    
+    CLASS ConversationSession {
+        + id: str
+        + name: str?
+        + created_at: datetime
+        + updated_at: datetime
+        + message_count: int
+        + model: str
+        + provider: str
+        + system_prompt: str
+        + metadata: dict
+    }
+    
+    CLASS ContextManager {
+        - max_tokens: int
+        - summary_threshold: int
+        + estimate_tokens(messages) int
+        + needs_summary(messages) bool
+        + create_summary_prompt(messages) str
+        + truncate_with_summary(messages, summary, keep_last) List[Message]
+    }
+    
+    ConversationStore --> ConversationSession : creates
+}
+
+package "mi_agente.agent" <<core>> {
+    CLASS Agent {
+        - settings: Settings
+        - console: AgentConsole
+        - tools: ToolRegistry
+        - system_prompt: str?
+        - messages: List[Message]
+        - max_context_tokens: int
+        - session_id: str?
+        - _llm: LLMClient?
+        - _memory: ConversationStore?
+        - _context_manager: ContextManager?
+        + run(user_input, stream) str
+        + chat()
+        + start_session(name) str
+        + resume_session(session_id) bool
+        + list_sessions(limit) List
+        - _call_llm(stream) LLMResponse
+        - _handle_response(response, stream) str?
+        - _execute_tool_call(tool_call)
+        - _truncate_context()
+        - _generate_summary() str?
+    }
+    
+    Agent --> Settings : uses
+    Agent --> AgentConsole : uses
+    Agent --> ToolRegistry : uses
+    Agent --> LLMClient : uses
+    Agent --> ConversationStore : uses
+    Agent --> ContextManager : uses
+}
+
+package "mi_agente.output" <<ui>> {
+    CLASS AgentConsole {
+        - console: Console
+        - verbose: bool
+        - _live: Live?
+        - _streaming_content: str
+        - history: InputHistory
+        + print_md(markdown)
+        + print_code(code, language)
+        + print_panel(content, title, style)
+        + print_user/assistant/system/tool_call/tool_result
+        + streaming(title) StreamingContext
+        + add_stream_chunk(chunk)
+        + end_streaming() str
+        + input(prompt) str
+        + print_spinner(message) SpinnerContext
+    }
+    
+    CLASS StreamingContext {
+        - console: AgentConsole
+        - _live: Live
+        + write(chunk)
+    }
+    
+    CLASS SpinnerContext {
+        - console: AgentConsole
+        - _spinner: Status
+    }
+    
+    CLASS InputHistory {
+        - history_file: Path
+        - _history: List[str]
+        + add(entry)
+        + get() List[str]
+        + _load()
+        + _save()
+    }
+    
+    CLASS Theme {
+        + DEFAULT_THEME: Theme
+        + DARK_THEME: Theme
+        + LIGHT_THEME: Theme
+        + THEMES: Dict[str, Theme]
+    }
+    
+    AgentConsole --> InputHistory : uses
+    AgentConsole --> Theme : uses
+    AgentConsole --> StreamingContext : creates
+    AgentConsole --> SpinnerContext : creates
+}
+
+' Cross-package relationships
+Agent ..> Settings : config
+Agent ..> ToolRegistry : tools
+Agent ..> LLMClient : llm
+Agent ..> ConversationStore : memory
+Agent ..> ContextManager : context
+Agent ..> AgentConsole : ui
+
+LLMFactory ..> Settings : reads provider
+LLMFactory ..> LLMClient : returns
+
+OpenAIClient ..> Settings : uses
+AnthropicClient ..> Settings : uses
+OllamaClient ..> Settings : uses
+
+ToolRegistry ..> Tool : manages
+ReadFile ..> ToolResult : returns
+WriteFile ..> ToolResult : returns
+
+ConversationStore ..> ConversationSession : creates
+ContextManager ..> Message : processes
+ContextManager ..> LLMClient : uses for summary
+
+@enduml

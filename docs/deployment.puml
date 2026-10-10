@@ -1,0 +1,94 @@
+@startuml
+!define NODE node
+
+skinparam node {
+    BackgroundColor<<local>> #e3f2fd
+    BackgroundColor<<remote>> #fff3e0
+    BackgroundColor<<storage>> #e8f5e9
+    BorderColor<<local>> #1976d2
+    BorderColor<<remote>> #f57c00
+    BorderColor<<storage>> #388e3c
+}
+
+package "Usuario" {
+    ACTOR Dev
+}
+
+package "Terminal Linux" <<local>> {
+    node "Shell (bash/zsh/fish)" as Shell {
+        [mi-agente CLI\n(Typer App)] as CLI
+        [Autocompletado\nbash_completion] as Completion
+        [Historial readline\n~/.mi-agente/memory/input_history.txt] as Readline
+    }
+    
+    node "Python 3.11+" as Python {
+        [mi_agente package\nsrc/mi_agente/] as Package
+    }
+    
+    node "FS Local" as LocalFS {
+        [.env\n(proyecto)] as DotEnv
+        [.env.example\n(template)] as DotEnvExample
+        [~/.mi-agente/\nconfig] as ConfigDir
+        [~/.mi-agente/memory/\nconversations.db] as SQLite
+        [~/.mi-agente/profiles/\n*.env] as Profiles
+        [~/.mi-agente/memory/\ninput_history.txt] as History
+    }
+}
+
+package "Proveedores LLM" <<remote>> {
+    node "OpenAI API" as OpenAIAPI {
+        [chat/completions\nstreaming] as OpenAIEndpoint
+    }
+    
+    node "Anthropic API" as AnthropicAPI {
+        [messages/create\nstreaming] as AnthropicEndpoint
+    }
+    
+    node "Ollama Local" as OllamaLocal {
+        [/api/chat\nstreaming] as OllamaEndpoint
+    }
+}
+
+package "Sistema" <<local>> {
+    node "Kernel" as Kernel {
+        [subprocess\nshell commands] as Subprocess
+    }
+    node "FileSystem" as FS {
+        [read/write/list/glob/grep] as FSOperations
+    }
+}
+
+' Connections
+Dev --> Shell : interactúa
+Shell --> CLI : ejecuta
+CLI --> Completion : usa
+CLI --> Readline : usa
+CLI --> Package : importa
+
+Package --> DotEnv : carga config
+Package --> DotEnvExample : template para init
+Package --> ConfigDir : settings persistentes
+Package --> SQLite : ConversationStore
+Package --> Profiles : config-profile
+Package --> History : InputHistory
+
+Package --> OpenAIEndpoint : HTTPS (OpenAIClient)
+Package --> AnthropicEndpoint : HTTPS (AnthropicClient)
+Package --> OllamaEndpoint : HTTP (OllamaClient)
+
+Package --> Subprocess : ShellCommand tool
+Package --> FSOperations : Filesystem tools
+
+OpenAIEndpoint --> Dev : API Key (env)
+AnthropicEndpoint --> Dev : API Key (env)
+
+' Notes
+note right of DotEnv : Variables:\nLLM_PROVIDER, MODEL_NAME,\nAPI_KEY, TEMPERATURE, THEME...
+
+note right of SQLite : Tablas:\n- sessions\n- messages\nÍndices en session_id, updated_at
+
+note right of ConfigDir : Perfiles en ~/.mi-agente/profiles/\n.myprofile.env → config-use myprofile
+
+note bottom of Package : Entry point: mi_agente.main:app\nInstalado via: pip install -e .
+
+@enduml

@@ -1,0 +1,95 @@
+@startuml
+!define ACTOR actor
+
+skinparam sequence {
+    ActorBackgroundColor #e3f2fd
+    ActorBorderColor #1976d2
+    ParticipantBackgroundColor #fff3e0
+    ParticipantBorderColor #f57c00
+    LifeLineBackgroundColor #fafafa
+    LifeLineBorderColor #999
+    ArrowColor #666
+    ArrowFontSize 11
+    NoteBackgroundColor #fffde7
+    NoteBorderColor #fbc02d
+}
+
+ACTOR User
+participant "main.py\n(Typer)" as Main
+participant "Agent" as Agent
+participant "AgentConsole" as Console
+participant "LLMClient\n(Factory)" as LLMFactory
+participant "OpenAIClient" as OpenAI
+participant "ToolRegistry" as Registry
+participant "WriteFile" as WriteFile
+participant "ConversationStore" as Store
+
+== Inicialización ==
+User -> Main: mi-agente chat --new
+Main -> Agent: new Agent(settings)
+Agent -> LLMFactory: create_llm_client(settings)
+LLMFactory -> OpenAI: new OpenAIClient(settings)
+Agent -> Registry: create_default_registry()
+Agent -> Store: new ConversationStore()
+Agent -> Agent: start_session()\n→ Store.create_session()
+
+== Chat Loop ==
+loop Chat interactivo
+    User -> Console: input("[prompt]▶[/prompt] ")
+    Console --> User: "Hola, ¿qué archivos hay?"
+    
+    User -> Agent: run("Hola, ¿qué archivos hay?")
+    
+    Agent -> Console: print_user("Hola, ¿qué archivos hay?")
+    
+    Agent -> LLMFactory: complete(messages, tools, stream=true)
+    LLMFactory -> OpenAI: chat.completions.create(...)
+    
+    alt Streaming
+        OpenAI --> LLMFactory: Stream[ChatCompletionChunk]
+        LLMFactory --> Agent: Iterator[LLMResponse]
+        loop each chunk
+            Agent -> Console: add_stream_chunk(chunk)
+            Console -> User: Live Markdown update
+        end
+        Agent -> Console: end_streaming()
+    end
+    
+    alt Tool calls en respuesta
+        Agent -> Registry: execute("list_dir", {})
+        Registry -> WriteFile: (no match)
+        Registry -> WriteFile: (no match)
+        Registry -> ListDir: execute(path=".")
+        ListDir --> Registry: ToolResult(success, "file1.py\nfile2.txt")
+        Registry --> Agent: ToolResult
+        
+        Agent -> Console: print_tool_result("list_dir", "file1.py\nfile2.txt")
+        
+        Agent -> LLMFactory: complete(messages + tool_result, tools, stream=true)
+        LLMFactory -> OpenAI: chat.completions.create(...)
+        OpenAI --> LLMFactory: Stream[ChatCompletionChunk]
+        LLMFactory --> Agent: Iterator[LLMResponse]
+        loop each chunk
+            Agent -> Console: add_stream_chunk(chunk)
+        end
+        Agent -> Console: end_streaming()
+    end
+    
+    Agent -> Store: save_messages(session_id, messages)
+    
+    Agent --> User: Respuesta final mostrada
+end
+
+== Comandos internos ==
+User -> Console: input("/sessions")
+Console --> User: Lista sesiones desde Store.list_sessions()
+
+User -> Console: input("/resume abc123")
+Console --> User: Reanuda sesión Store.load_session("abc123")
+
+User -> Console: input("exit")
+Console -> Agent: break loop
+Agent -> Store: save final messages
+Agent --> User: "Saliendo..."
+
+@enduml
