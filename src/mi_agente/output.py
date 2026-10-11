@@ -1,66 +1,70 @@
 """Formato de salida bonito usando Rich."""
 
-import os
 import atexit
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.spinner import Spinner
 from rich.syntax import Syntax
-from rich.text import Text
 from rich.theme import Theme
 
 from mi_agente.config import get_settings
 
+if TYPE_CHECKING:
+    from rich.status import Status
 
 # ─── Temas de color ───
 
-DEFAULT_THEME = Theme({
-    "info": "bold cyan",
-    "warning": "bold yellow",
-    "error": "bold red",
-    "success": "bold green",
-    "dim": "dim",
-    "panel.system": "dim cyan",
-    "panel.user": "green",
-    "panel.assistant": "blue",
-    "panel.tool": "yellow",
-    "panel.tool_error": "red",
-    "prompt": "bold green",
-})
+DEFAULT_THEME = Theme(
+    {
+        "info": "bold cyan",
+        "warning": "bold yellow",
+        "error": "bold red",
+        "success": "bold green",
+        "dim": "dim",
+        "panel.system": "dim cyan",
+        "panel.user": "green",
+        "panel.assistant": "blue",
+        "panel.tool": "yellow",
+        "panel.tool_error": "red",
+        "prompt": "bold green",
+    }
+)
 
-DARK_THEME = Theme({
-    "info": "bold bright_cyan",
-    "warning": "bold bright_yellow",
-    "error": "bold bright_red",
-    "success": "bold bright_green",
-    "dim": "dim",
-    "panel.system": "bright_black",
-    "panel.user": "bright_green",
-    "panel.assistant": "bright_blue",
-    "panel.tool": "bright_yellow",
-    "panel.tool_error": "bright_red",
-    "prompt": "bold bright_green",
-})
+DARK_THEME = Theme(
+    {
+        "info": "bold bright_cyan",
+        "warning": "bold bright_yellow",
+        "error": "bold bright_red",
+        "success": "bold bright_green",
+        "dim": "dim",
+        "panel.system": "bright_black",
+        "panel.user": "bright_green",
+        "panel.assistant": "bright_blue",
+        "panel.tool": "bright_yellow",
+        "panel.tool_error": "bright_red",
+        "prompt": "bold bright_green",
+    }
+)
 
-LIGHT_THEME = Theme({
-    "info": "bold blue",
-    "warning": "bold orange3",
-    "error": "bold red",
-    "success": "bold green",
-    "dim": "dim",
-    "panel.system": "grey50",
-    "panel.user": "green",
-    "panel.assistant": "blue",
-    "panel.tool": "yellow",
-    "panel.tool_error": "red",
-    "prompt": "bold green",
-})
+LIGHT_THEME = Theme(
+    {
+        "info": "bold blue",
+        "warning": "bold orange3",
+        "error": "bold red",
+        "success": "bold green",
+        "dim": "dim",
+        "panel.system": "grey50",
+        "panel.user": "green",
+        "panel.assistant": "blue",
+        "panel.tool": "yellow",
+        "panel.tool_error": "red",
+        "prompt": "bold green",
+    }
+)
 
 THEMES = {
     "default": DEFAULT_THEME,
@@ -70,6 +74,7 @@ THEMES = {
 
 
 # ─── Historial de input ───
+
 
 class InputHistory:
     """Gestiona historial de comandos persistente."""
@@ -103,6 +108,7 @@ class InputHistory:
 
 # ─── Consola principal ───
 
+
 class AgentConsole:
     """Wrapper sobre Rich Console para output consistente."""
 
@@ -112,7 +118,7 @@ class AgentConsole:
         self.verbose = verbose
         self._live: Live | None = None
         self._streaming_content = ""
-        
+
         # Historial
         settings = get_settings()
         self.history = InputHistory(settings.memory_dir / "input_history.txt")
@@ -123,7 +129,7 @@ class AgentConsole:
 
     # ─── Basic output ───
 
-    def print(self, *args, **kwargs) -> None:
+    def print(self, *args: Any, **kwargs: Any) -> None:
         self.console.print(*args, **kwargs)
 
     def print_md(self, markdown: str) -> None:
@@ -153,13 +159,17 @@ class AgentConsole:
         self.console.print(panel)
 
     def print_system(self, content: str) -> None:
-        self.print_panel(content, title="🤖 System", style="panel.system", border_style="panel.system")
+        self.print_panel(
+            content, title="🤖 System", style="panel.system", border_style="panel.system"
+        )
 
     def print_user(self, content: str) -> None:
         self.print_panel(content, title="👤 User", style="panel.user", border_style="panel.user")
 
     def print_assistant(self, content: str) -> None:
-        self.print_panel(content, title="💬 Assistant", style="panel.assistant", border_style="panel.assistant")
+        self.print_panel(
+            content, title="💬 Assistant", style="panel.assistant", border_style="panel.assistant"
+        )
 
     def print_tool_call(self, name: str, args: dict) -> None:
         args_str = ", ".join(f"{k}={v!r}" for k, v in args.items())
@@ -194,15 +204,16 @@ class AgentConsole:
 
     # ─── Streaming ───
 
-    @contextmanager
-    def streaming(self, title: str = "Assistant") -> Iterator["StreamingContext"]:
-        """Context manager para streaming de respuesta."""
+    def start_streaming(self, title: str = "Assistant") -> None:
+        """Inicia la visualización en vivo de la respuesta."""
         self._streaming_content = ""
-        ctx = StreamingContext(self, title)
-        try:
-            yield ctx
-        finally:
-            self._live = None
+        self._live = Live(
+            Markdown(""),
+            console=self.console,
+            refresh_per_second=15,
+            transient=False,
+        )
+        self._live.__enter__()
 
     def add_stream_chunk(self, chunk: str) -> None:
         """Añade chunk al streaming actual."""
@@ -210,8 +221,15 @@ class AgentConsole:
         if self._live:
             self._live.update(Markdown(self._streaming_content))
 
+    def stop_streaming(self) -> None:
+        """Finaliza la visualización en vivo."""
+        if self._live is not None:
+            self._live.__exit__(None, None, None)
+            self._live = None
+
     def end_streaming(self) -> str:
         """Finaliza streaming y retorna contenido completo."""
+        self.stop_streaming()
         content = self._streaming_content
         self._streaming_content = ""
         return content
@@ -223,6 +241,7 @@ class AgentConsole:
         try:
             # Usar readline si está disponible para historial
             import readline
+
             readline.set_history_length(1000)
             for item in self.history.get():
                 readline.add_history(item)
@@ -235,51 +254,28 @@ class AgentConsole:
         return result
 
 
-class StreamingContext:
-    """Contexto para streaming en vivo."""
-
-    def __init__(self, console: AgentConsole, title: str):
-        self.console = console
-        self.title = title
-        self._live = Live(
-            Markdown(""),
-            console=console.console,
-            refresh_per_second=15,
-            transient=False,
-        )
-        self._live.__enter__()
-        console._live = self._live
-
-    def __enter__(self) -> "StreamingContext":
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        self._live.__exit__(exc_type, exc_val, exc_tb)
-        self.console._live = None
-
-    def write(self, chunk: str) -> None:
-        self.console.add_stream_chunk(chunk)
-
-
 class SpinnerContext:
     """Context manager para spinner de carga."""
 
     def __init__(self, console: AgentConsole, message: str):
         self.console = console
         self.message = message
-        self._spinner = None
+        self._spinner: Status | None = None
 
     def __enter__(self) -> "SpinnerContext":
         self._spinner = self.console.console.status(self.message, spinner="dots")
         self._spinner.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object
+    ) -> None:
         if self._spinner:
-            self._spinner.__exit__(exc_type, exc_val, exc_tb)
+            self._spinner.__exit__(exc_type, exc_val, exc_tb)  # type: ignore[arg-type]
 
 
 # ─── Helpers ───
+
 
 def create_console(verbose: bool = False, theme: str = "default") -> AgentConsole:
     """Factory para crear consola."""

@@ -10,7 +10,7 @@ from rich.console import Console
 
 from mi_agente.agent import Agent
 from mi_agente.config import Settings, get_settings, reload_settings
-from mi_agente.output import AgentConsole, create_console
+from mi_agente.output import create_console
 
 app = typer.Typer(
     name="mi-agente",
@@ -24,9 +24,11 @@ console = Console()
 
 # ─── Global options ───
 
+
 def version_callback(value: bool) -> None:
     if value:
         from mi_agente import __version__
+
         console.print(f"mi-agente v{__version__}")
         raise typer.Exit()
 
@@ -36,9 +38,13 @@ def main(
     ctx: typer.Context,
     verbose: Annotated[bool, typer.Option("-v", "--verbose", help="Modo verbose")] = False,
     model: Annotated[str | None, typer.Option("--model", help="Sobrescribe modelo")] = None,
-    temp: Annotated[float | None, typer.Option("--temp", "--temperature", help="Temperatura (0-2)")] = None,
+    temp: Annotated[
+        float | None, typer.Option("--temp", "--temperature", help="Temperatura (0-2)")
+    ] = None,
     provider: Annotated[str | None, typer.Option("--provider", help="Proveedor LLM")] = None,
-    version: Annotated[bool, typer.Option("--version", "-V", callback=version_callback, is_eager=True)] = False,
+    version: Annotated[
+        bool, typer.Option("--version", "-V", callback=version_callback, is_eager=True)
+    ] = False,
 ) -> None:
     """Agente CLI inteligente - usa IA en tu terminal."""
     ctx.ensure_object(dict)
@@ -57,7 +63,7 @@ def _create_agent(ctx: typer.Context) -> Agent:
     if ctx.obj.get("override_temp") is not None:
         settings.temperature = ctx.obj["override_temp"]
     if ctx.obj.get("override_provider"):
-        settings.llm_provider = ctx.obj["override_provider"]  # type: ignore
+        settings.llm_provider = ctx.obj["override_provider"]  # type: ignore[assignment]
 
     return Agent(
         settings=settings,
@@ -67,10 +73,13 @@ def _create_agent(ctx: typer.Context) -> Agent:
 
 # ─── Commands ───
 
+
 @app.command()
 def chat(
     ctx: typer.Context,
-    resume: Annotated[str | None, typer.Option("--resume", "-r", help="Reanuda sesión por ID")] = None,
+    resume: Annotated[
+        str | None, typer.Option("--resume", "-r", help="Reanuda sesión por ID")
+    ] = None,
     new_session: Annotated[bool, typer.Option("--new", "-n", help="Inicia nueva sesión")] = False,
 ) -> None:
     """Inicia chat interactivo con el agente."""
@@ -87,7 +96,9 @@ def chat(
 def run(
     ctx: typer.Context,
     prompt: Annotated[str, typer.Argument(help="Prompt a enviar al agente")],
-    stream: Annotated[bool, typer.Option("--stream/--no-stream", help="Streaming de respuesta")] = True,
+    stream: Annotated[
+        bool, typer.Option("--stream/--no-stream", help="Streaming de respuesta")
+    ] = True,
 ) -> None:
     """Ejecuta un solo prompt y muestra la respuesta."""
     agent = _create_agent(ctx)
@@ -100,13 +111,16 @@ def config(
     key: Annotated[str | None, typer.Argument(help="Clave a ver/modificar")] = None,
     value: Annotated[str | None, typer.Argument(help="Nuevo valor")] = None,
     edit: Annotated[bool, typer.Option("--edit", "-e", help="Abre .env en editor")] = False,
-    show: Annotated[bool, typer.Option("--show", "-s", help="Muestra configuración actual")] = False,
+    show: Annotated[
+        bool, typer.Option("--show", "-s", help="Muestra configuración actual")
+    ] = False,
 ) -> None:
     """Gestiona configuración del agente."""
     settings = get_settings()
 
     if edit:
         import subprocess
+
         env_path = Path(".env")
         if not env_path.exists():
             # Buscar .env.example en la raíz del proyecto
@@ -118,7 +132,7 @@ def config(
                 console.print("[red].env.example no encontrado[/red]")
                 return
         editor = os.environ.get("EDITOR", "code" if sys.platform != "win32" else "notepad")
-        subprocess.run([editor, str(env_path)])
+        subprocess.run([editor, str(env_path)], check=False)
         reload_settings()
         console.print("[green]Configuración recargada[/green]")
         return
@@ -188,11 +202,11 @@ def config_use(
     """Cambia al perfil especificado (copia a .env)."""
     profiles_dir = Path.home() / ".mi-agente" / "profiles"
     profile_path = profiles_dir / f"{name}.env"
-    
+
     if not profile_path.exists():
         console.print(f"[red]Perfil '{name}' no encontrado[/red]")
         return
-    
+
     env_path = Path(".env")
     env_path.write_text(profile_path.read_text())
     reload_settings()
@@ -202,12 +216,14 @@ def config_use(
 @app.command()
 def tools(
     ctx: typer.Context,
-    list_all: Annotated[bool, typer.Option("--list", "-l", help="Lista todas las herramientas")] = True,
+    list_all: Annotated[
+        bool, typer.Option("--list", "-l", help="Lista todas las herramientas")
+    ] = True,
 ) -> None:
     """Lista herramientas disponibles."""
-    from mi_agente.tools import create_default_registry
     from mi_agente.output import create_console
-    
+    from mi_agente.tools import create_default_registry
+
     registry = create_default_registry()
     console = create_console(verbose=ctx.obj.get("verbose", False))
     console.print_md("**Herramientas disponibles:**")
@@ -223,13 +239,15 @@ def sessions(
 ) -> None:
     """Lista sesiones de conversación guardadas."""
     agent = _create_agent(ctx)
-    agent._print_sessions()
+    agent._print_sessions(limit)
 
 
 @app.command()
 def init(
     ctx: typer.Context,
-    force: Annotated[bool, typer.Option("--force", "-f", help="Sobrescribe archivos existentes")] = False,
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Sobrescribe archivos existentes")
+    ] = False,
 ) -> None:
     """Inicializa proyecto en directorio actual."""
     env_path = Path(".env")
@@ -251,40 +269,53 @@ def init(
 def completion(
     shell: Annotated[str, typer.Argument(help="Shell: bash, zsh, fish")],
 ) -> None:
-    """Genera script de autocompletado para tu shell."""
-    import subprocess
-    result = subprocess.run(
-        [sys.executable, "-m", "mi_agente.main", "--install-completion"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        console.print(result.stdout)
-    else:
-        console.print(f"[red]Error: {result.stderr}[/red]")
+    """Genera script de autocompletado para la shell indicada."""
+    try:
+        from typer._completion_shared import get_completion_script
+
+        script = get_completion_script(
+            prog_name="mi-agente",
+            complete_var="_MI_AGENTE_COMPLETE",
+            shell=_resolve_shell_name(shell),
+        )
+    except (ImportError, KeyError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+    console.print(script.strip())
 
 
 @app.command()
 def install_completion(
     shell: Annotated[str, typer.Argument(help="Shell: bash, zsh, fish")],
-    path: Annotated[str | None, typer.Option("--path", help="Ruta donde instalar")] = None,
 ) -> None:
-    """Instala autocompletado en el shell."""
-    import subprocess
-    cmd = [sys.executable, "-m", "mi_agente.main", "--install-completion"]
-    if shell:
-        cmd.extend(["--shell", shell])
-    if path:
-        cmd.extend(["--path", path])
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode == 0:
-        console.print("[green]Autocompletado instalado[/green]")
-        console.print(result.stdout)
-    else:
-        console.print(f"[red]Error: {result.stderr}[/red]")
+    """Instala autocompletado en la shell indicada."""
+    try:
+        from typer._completion_shared import Shells, install
+
+        shell_name, install_path = install(
+            shell=Shells[_resolve_shell_name(shell)].value,
+            prog_name="mi-agente",
+            complete_var="_MI_AGENTE_COMPLETE",
+        )
+        console.print(f"[green]Autocompletado {shell_name} instalado en {install_path}[/green]")
+    except (ImportError, KeyError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
 
 
 # ─── Helpers ───
+
+
+def _resolve_shell_name(shell: str) -> str:
+    """Valida y normaliza el nombre de shell soportado."""
+    from typer._completion_shared import Shells
+
+    normalized = shell.strip().lower()
+    if normalized not in Shells._value2member_map_:
+        valid = ", ".join(s.value for s in Shells)
+        raise KeyError(f"Shell no soportado: {shell}. Usa: {valid}")
+    return normalized
+
 
 def _print_config(settings: Settings) -> None:
     c = create_console()

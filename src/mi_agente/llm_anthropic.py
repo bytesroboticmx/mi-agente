@@ -1,6 +1,8 @@
 """Cliente Anthropic para el agente."""
 
-from typing import Any, Iterator
+import json
+from collections.abc import Iterator
+from typing import Any
 
 from anthropic import Anthropic
 
@@ -24,7 +26,7 @@ class AnthropicClient(LLMClient):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         stream: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResponse | Iterator[LLMResponse]:
         # Separar system prompt
         system_prompt = ""
@@ -38,7 +40,9 @@ class AnthropicClient(LLMClient):
         anthropic_tools = [t.to_anthropic() for t in tools] if tools else None
 
         if stream:
-            return self._stream_complete(system_prompt, anthropic_messages, anthropic_tools, **kwargs)
+            return self._stream_complete(
+                system_prompt, anthropic_messages, anthropic_tools, **kwargs
+            )
 
         response = self.client.messages.create(
             model=self.settings.model_name,
@@ -46,10 +50,9 @@ class AnthropicClient(LLMClient):
             messages=anthropic_messages,
             tools=anthropic_tools,
             tool_choice={"type": "auto"} if anthropic_tools else None,
-            temperature=self.settings.temperature,
             max_tokens=self.settings.max_tokens,
             **kwargs,
-        )
+        )  # type: ignore[arg-type]
 
         content = None
         tool_calls = None
@@ -60,14 +63,16 @@ class AnthropicClient(LLMClient):
             elif block.type == "tool_use":
                 if tool_calls is None:
                     tool_calls = []
-                tool_calls.append({
-                    "id": block.id,
-                    "type": "function",
-                    "function": {
-                        "name": block.name,
-                        "arguments": json.dumps(block.input),
-                    },
-                })
+                tool_calls.append(
+                    {
+                        "id": block.id,
+                        "type": "function",
+                        "function": {
+                            "name": block.name,
+                            "arguments": json.dumps(block.input),
+                        },
+                    }
+                )
 
         return LLMResponse(
             content=content,
@@ -85,9 +90,8 @@ class AnthropicClient(LLMClient):
         system_prompt: str,
         messages: list[dict],
         tools: list[dict] | None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Iterator[LLMResponse]:
-        import json
 
         stream = self.client.messages.stream(
             model=self.settings.model_name,
@@ -95,19 +99,16 @@ class AnthropicClient(LLMClient):
             messages=messages,
             tools=tools,
             tool_choice={"type": "auto"} if tools else None,
-            temperature=self.settings.temperature,
             max_tokens=self.settings.max_tokens,
             **kwargs,
-        )
+        )  # type: ignore[arg-type]
 
-        accumulated_content = ""
         accumulated_tool_calls: dict[int, dict] = {}
 
         with stream as s:
             for event in s:
                 if event.type == "content_block_delta":
                     if event.delta.type == "text_delta":
-                        accumulated_content += event.delta.text
                         yield LLMResponse(content=event.delta.text)
                     elif event.delta.type == "input_json_delta":
                         idx = event.index
@@ -117,7 +118,9 @@ class AnthropicClient(LLMClient):
                                 "type": "function",
                                 "function": {"name": "", "arguments": ""},
                             }
-                        accumulated_tool_calls[idx]["function"]["arguments"] += event.delta.partial_json
+                        accumulated_tool_calls[idx]["function"]["arguments"] += (
+                            event.delta.partial_json
+                        )
                 elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         idx = event.index
@@ -130,9 +133,10 @@ class AnthropicClient(LLMClient):
                             },
                         }
                 elif event.type == "message_stop":
-                    tool_calls = list(accumulated_tool_calls.values()) if accumulated_tool_calls else None
+                    tool_calls = (
+                        list(accumulated_tool_calls.values()) if accumulated_tool_calls else None
+                    )
                     yield LLMResponse(
-                        content=accumulated_content if accumulated_content else None,
                         tool_calls=tool_calls,
                         finish_reason="tool_use" if tool_calls else "end_turn",
                         model=self.settings.model_name,
@@ -143,7 +147,7 @@ class AnthropicClient(LLMClient):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         stream: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResponse | Any:
         # TODO: Implementar async con anthropic.AsyncAnthropic
         return self.complete(messages, tools, stream, **kwargs)
@@ -162,10 +166,10 @@ class AnthropicClient(LLMClient):
             response = self.client.messages.count_tokens(
                 model=self.settings.model_name,
                 system=system_prompt or None,
-                messages=anthropic_messages,
+                messages=anthropic_messages,  # type: ignore[arg-type]
             )
             return response.input_tokens
         except Exception:
-            # Fallback: aproximación
+            # Sin API de conteo disponible: aproximar por longitud
             total_chars = sum(len(m.content or "") for m in messages)
             return total_chars // 4

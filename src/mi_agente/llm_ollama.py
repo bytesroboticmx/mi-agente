@@ -1,7 +1,8 @@
 """Cliente Ollama para el agente (modelos locales)."""
 
 import json
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 import httpx
 
@@ -23,7 +24,7 @@ class OllamaClient(LLMClient):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         stream: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResponse | Iterator[LLMResponse]:
         ollama_messages = [m.to_openai() for m in messages]
         ollama_tools = [t.to_openai() for t in tools] if tools else None
@@ -67,14 +68,16 @@ class OllamaClient(LLMClient):
             tool_calls = []
             for tc in msg["tool_calls"]:
                 func = tc.get("function", {})
-                tool_calls.append({
-                    "id": tc.get("id", ""),
-                    "type": "function",
-                    "function": {
-                        "name": func.get("name", ""),
-                        "arguments": json.dumps(func.get("arguments", {})),
-                    },
-                })
+                tool_calls.append(
+                    {
+                        "id": tc.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": func.get("name", ""),
+                            "arguments": json.dumps(func.get("arguments", {})),
+                        },
+                    }
+                )
 
         return LLMResponse(
             content=content,
@@ -96,14 +99,16 @@ class OllamaClient(LLMClient):
             tool_calls = []
             for tc in msg["tool_calls"]:
                 func = tc.get("function", {})
-                tool_calls.append({
-                    "id": tc.get("id", ""),
-                    "type": "function",
-                    "function": {
-                        "name": func.get("name", ""),
-                        "arguments": json.dumps(func.get("arguments", {})),
-                    },
-                })
+                tool_calls.append(
+                    {
+                        "id": tc.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": func.get("name", ""),
+                            "arguments": json.dumps(func.get("arguments", {})),
+                        },
+                    }
+                )
 
         return LLMResponse(
             content=content,
@@ -117,7 +122,7 @@ class OllamaClient(LLMClient):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         stream: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResponse | Any:
         # TODO: Implementar async con httpx.AsyncClient
         return self.complete(messages, tools, stream, **kwargs)

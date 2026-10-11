@@ -1,7 +1,7 @@
 """Cliente OpenAI para el agente."""
 
-import json
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from openai import OpenAI
 
@@ -25,7 +25,7 @@ class OpenAIClient(LLMClient):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         stream: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResponse | Iterator[LLMResponse]:
         openai_messages = [m.to_openai() for m in messages]
         openai_tools = [t.to_openai() for t in tools] if tools else None
@@ -35,13 +35,13 @@ class OpenAIClient(LLMClient):
 
         response = self.client.chat.completions.create(
             model=self.settings.model_name,
-            messages=openai_messages,
-            tools=openai_tools,
+            messages=openai_messages,  # type: ignore[arg-type]
+            tools=openai_tools,  # type: ignore[arg-type]
             tool_choice="auto" if openai_tools else None,
             temperature=self.settings.temperature,
             max_tokens=self.settings.max_tokens,
             **kwargs,
-        )
+        )  # type: ignore[call-overload]
 
         choice = response.choices[0]
         tool_calls = None
@@ -70,20 +70,19 @@ class OpenAIClient(LLMClient):
         self,
         messages: list[dict],
         tools: list[dict] | None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Iterator[LLMResponse]:
         stream = self.client.chat.completions.create(
             model=self.settings.model_name,
-            messages=messages,
-            tools=tools,
+            messages=messages,  # type: ignore[arg-type]
+            tools=tools,  # type: ignore[arg-type]
             tool_choice="auto" if tools else None,
             temperature=self.settings.temperature,
             max_tokens=self.settings.max_tokens,
             stream=True,
             **kwargs,
-        )
+        )  # type: ignore[call-overload]
 
-        accumulated_content = ""
         accumulated_tool_calls: list[dict] = []
 
         for chunk in stream:
@@ -91,27 +90,29 @@ class OpenAIClient(LLMClient):
             delta = choice.delta
 
             if delta.content:
-                accumulated_content += delta.content
                 yield LLMResponse(content=delta.content)
 
             if delta.tool_calls:
                 for tc in delta.tool_calls:
                     idx = tc.index
                     if idx >= len(accumulated_tool_calls):
-                        accumulated_tool_calls.append({
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""},
-                        })
+                        accumulated_tool_calls.append(
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        )
                     if tc.function.name:
                         accumulated_tool_calls[idx]["function"]["name"] = tc.function.name
                     if tc.function.arguments:
-                        accumulated_tool_calls[idx]["function"]["arguments"] += tc.function.arguments
+                        accumulated_tool_calls[idx]["function"]["arguments"] += (
+                            tc.function.arguments
+                        )
 
             if choice.finish_reason:
                 yield LLMResponse(
-                    content=accumulated_content if accumulated_content else None,
-                    tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,
+                    tool_calls=accumulated_tool_calls or None,
                     finish_reason=choice.finish_reason,
                     model=chunk.model,
                 )
@@ -121,7 +122,7 @@ class OpenAIClient(LLMClient):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         stream: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResponse | Any:
         # TODO: Implementar async con openai.AsyncOpenAI
         return self.complete(messages, tools, stream, **kwargs)

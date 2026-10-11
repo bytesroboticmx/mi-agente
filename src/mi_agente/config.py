@@ -1,11 +1,11 @@
 """Configuración del agente usando Pydantic + python-dotenv (sin pydantic-settings)."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, validator
-from pydantic import ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
 class Settings(BaseModel):
@@ -20,10 +20,10 @@ class Settings(BaseModel):
     model_name: str = "gpt-4o-mini"
 
     # API Key (secreto)
-    api_key: SecretStr = Field(default="")
+    api_key: SecretStr = Field(default_factory=lambda: SecretStr(""))
 
     # Base URL opcional (para Ollama/local)
-    base_url: Optional[str] = None
+    base_url: str | None = None
 
     # Parámetros de generación
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -38,7 +38,7 @@ class Settings(BaseModel):
     )
 
     # Directorio de trabajo
-    working_dir: Union[str, Path] = Field(default_factory=Path.cwd)
+    working_dir: Path = Field(default_factory=Path.cwd)
 
     # Configuración de tools
     tool_timeout: int = Field(default=30, gt=0)
@@ -46,14 +46,14 @@ class Settings(BaseModel):
 
     # Memoria
     memory_enabled: bool = True
-    memory_dir: Union[str, Path] = Field(default_factory=lambda: Path.home() / ".mi-agente" / "memory")
+    memory_dir: Path = Field(default_factory=lambda: Path.home() / ".mi-agente" / "memory")
 
     # UI / Tema
     theme: Literal["default", "dark", "light"] = "default"
 
-    @validator("working_dir", "memory_dir", pre=True)
+    @field_validator("working_dir", "memory_dir", mode="before")
     @classmethod
-    def expand_path(cls, v):
+    def expand_path(cls, v: object) -> object:
         if isinstance(v, str):
             return Path(v).expanduser()
         return v
@@ -63,26 +63,55 @@ class Settings(BaseModel):
         return self.api_key.get_secret_value() if self.api_key else ""
 
 
+_ENV_VARS = [
+    "LLM_PROVIDER",
+    "MODEL_NAME",
+    "API_KEY",
+    "BASE_URL",
+    "TEMPERATURE",
+    "MAX_TOKENS",
+    "SYSTEM_PROMPT",
+    "WORKING_DIR",
+    "TOOL_TIMEOUT",
+    "CONFIRM_DANGEROUS_TOOLS",
+    "MEMORY_ENABLED",
+    "MEMORY_DIR",
+    "THEME",
+]
+
+
+def _clean_env_value(value: str) -> str:
+    """Quita comillas y comentarios en línea de un valor .env."""
+    value = value.strip()
+    if not value:
+        return value
+    quoted = value[0] in ("'", '"') and value[-1] == value[0]
+    if quoted:
+        return value[1:-1]
+    # Comentario en línea solo cuando el valor no está citado
+    if "#" in value:
+        value = value.split("#", 1)[0].rstrip()
+    return value
+
+
 def _load_env_file(env_path: Path = Path(".env")) -> dict:
     """Carga variables desde archivo .env manualmente."""
-    import os
-    result = {}
+    result: dict[str, str] = {}
     if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, value = line.split("=", 1)
-                result[key.strip()] = value.strip()
+        for raw_line in env_path.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            result[key.strip()] = _clean_env_value(value)
     # También incluir variables de entorno del sistema
-    for key in ["LLM_PROVIDER", "MODEL_NAME", "API_KEY", "BASE_URL", 
-                "TEMPERATURE", "MAX_TOKENS", "SYSTEM_PROMPT", "WORKING_DIR",
-                "TOOL_TIMEOUT", "CONFIRM_DANGEROUS_TOOLS", "MEMORY_ENABLED", "MEMORY_DIR"]:
+    for key in _ENV_VARS:
         if key in os.environ:
             result[key] = os.environ[key]
     return result
 
 
-def _parse_value(key: str, value: str):
+def _parse_value(key: str, value: str) -> bool | int | float | str:
     """Convierte string a tipo apropiado."""
     # Boolean
     if key in ("CONFIRM_DANGEROUS_TOOLS", "MEMORY_ENABLED"):
@@ -116,11 +145,11 @@ def get_settings() -> Settings:
         "MEMORY_DIR": "memory_dir",
         "THEME": "theme",
     }
-    parsed = {}
+    parsed: dict[str, object] = {}
     for key, value in env_data.items():
         field_name = field_map.get(key, key.lower())
         parsed[field_name] = _parse_value(key, value)
-    return Settings(**parsed)
+    return Settings(**parsed)  # type: ignore[arg-type]
 
 
 def reload_settings() -> Settings:

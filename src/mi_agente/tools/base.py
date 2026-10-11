@@ -1,5 +1,7 @@
 """Base para herramientas del agente."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -8,6 +10,7 @@ from typing import Any
 @dataclass
 class ToolResult:
     """Resultado de ejecutar una herramienta."""
+
     success: bool
     content: str
     error: str | None = None
@@ -27,9 +30,8 @@ class Tool(ABC):
     timeout: int = 30
 
     @abstractmethod
-    def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs: Any) -> ToolResult:
         """Ejecuta la herramienta."""
-        pass
 
     def to_openai_format(self) -> dict:
         """Formato para OpenAI function calling."""
@@ -63,7 +65,7 @@ class Tool(ABC):
 class ToolRegistry:
     """Registro de herramientas disponibles."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> None:
@@ -78,10 +80,10 @@ class ToolRegistry:
     def list(self) -> list[Tool]:
         return list(self._tools.values())
 
-    def get_openai_tools(self) -> list[dict]:
+    def get_openai_tools(self) -> list[dict]:  # type: ignore[valid-type]
         return [t.to_openai_format() for t in self._tools.values()]
 
-    def get_anthropic_tools(self) -> list[dict]:
+    def get_anthropic_tools(self) -> list[dict]:  # type: ignore[valid-type]
         return [t.to_anthropic_format() for t in self._tools.values()]
 
     def execute(self, name: str, args: dict, confirm: bool = True) -> ToolResult:
@@ -96,8 +98,9 @@ class ToolRegistry:
 
         # Confirmación para tools peligrosas
         if confirm and tool.dangerous:
-            from mi_agente.output import confirm
-            if not confirm(f"Ejecutar {tool.name} con args: {args}?"):
+            from mi_agente.output import confirm as confirm_prompt
+
+            if not confirm_prompt(f"Ejecutar {tool.name} con args: {args}?"):
                 return ToolResult(success=False, content="", error="Cancelado por usuario")
 
         try:

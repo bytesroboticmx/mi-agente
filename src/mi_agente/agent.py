@@ -1,13 +1,17 @@
 """Núcleo del agente: loop principal y manejo de herramientas."""
 
+import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import TYPE_CHECKING, cast
 
 from mi_agente.config import Settings, get_settings
-from mi_agente.llm import LLMResponse, Message, ToolSpec, create_llm_client
+from mi_agente.llm import LLMClient, LLMResponse, Message, ToolSpec, create_llm_client
 from mi_agente.memory import ContextManager, ConversationStore
 from mi_agente.output import AgentConsole, create_console
-from mi_agente.tools import ToolRegistry, ToolResult, create_default_registry
+from mi_agente.tools import ToolRegistry, create_default_registry
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 @dataclass
@@ -20,36 +24,39 @@ class Agent:
     system_prompt: str | None = None
     messages: list[Message] = field(default_factory=list)
     max_context_tokens: int = 100000
-    session_id: Optional[str] = None
-    _llm: Optional[Any] = field(default=None, init=False, repr=False)
-    _memory: Optional[ConversationStore] = field(default=None, init=False, repr=False)
-    _context_manager: Optional[ContextManager] = field(default=None, init=False, repr=False)
+    session_id: str | None = None
+    _llm: LLMClient | None = field(default=None, init=False, repr=False)
+    _memory: ConversationStore | None = field(default=None, init=False, repr=False)
+    _context_manager: ContextManager | None = field(default=None, init=False, repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.system_prompt is None:
             self.system_prompt = self.settings.system_prompt
         if self.settings.memory_enabled:
-            self._memory = ConversationStore()
+            self._memory = ConversationStore(settings=self.settings)
             self._context_manager = ContextManager()
-        
-        # Recreate console with theme
-        self.console = create_console(theme=self.settings.theme)
-        
+
+        # Recrear consola con el tema, conservando el modo verbose inyectado
+        self.console = create_console(
+            verbose=getattr(self.console, "verbose", False),
+            theme=self.settings.theme,
+        )
+
         self._init_messages()
 
     @property
-    def llm(self):
+    def llm(self) -> LLMClient:
         """Lazy initialization of LLM client."""
         if self._llm is None:
             self._llm = create_llm_client(self.settings)
         return self._llm
 
     @property
-    def memory(self) -> Optional[ConversationStore]:
+    def memory(self) -> ConversationStore | None:
         return self._memory
 
     @property
-    def context_manager(self) -> Optional[ContextManager]:
+    def context_manager(self) -> ContextManager | None:
         return self._context_manager
 
     def _init_messages(self) -> None:
@@ -60,12 +67,16 @@ class Agent:
         self.messages.append(Message(role="user", content=content))
         self._maybe_save()
 
-    def add_assistant_message(self, content: str | None, tool_calls: list[dict] | None = None) -> None:
+    def add_assistant_message(
+        self, content: str | None, tool_calls: list[dict] | None = None
+    ) -> None:
         self.messages.append(Message(role="assistant", content=content, tool_calls=tool_calls))
         self._maybe_save()
 
     def add_tool_result(self, tool_call_id: str, name: str, result: str) -> None:
-        self.messages.append(Message(role="tool", content=result, tool_call_id=tool_call_id, name=name))
+        self.messages.append(
+            Message(role="tool", content=result, tool_call_id=tool_call_id, name=name)
+        )
         self._maybe_save()
 
     def _maybe_save(self) -> None:
@@ -77,11 +88,13 @@ class Agent:
         """Convierte tools registradas a ToolSpec para el LLM."""
         specs = []
         for tool in self.tools.list():
-            specs.append(ToolSpec(
-                name=tool.name,
-                description=tool.description,
-                parameters=tool.parameters,
-            ))
+            specs.append(
+                ToolSpec(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=tool.parameters,
+                )
+            )
         return specs
 
     def run(self, user_input: str, stream: bool = True) -> str:
@@ -113,15 +126,24 @@ class Agent:
 
         response = self.llm.complete(
             messages=self.messages,
-            tools=tool_specs if tool_specs else None,
+            tools=tool_specs or None,
             stream=stream,
         )
 
         if stream:
-            # Consumir stream y acumular
-            chunks = []
-            for chunk in response:
-                chunks.append(chunk)
+            # Consumir stream mostrándolo en vivo
+            chunks: list[LLMResponse] = []
+            self.console.start_streaming()
+            try:
+
+                stream_iter = cast("Iterator[LLMResponse]", response)
+                for chunk in stream_iter:
+                    chunks.append(chunk)
+                    if chunk.content:
+                        self.console.add_stream_chunk(chunk.content)
+            finally:
+                self.console.stop_streaming()
+
             # Reconstruir respuesta final
             content_parts = [c.content for c in chunks if c.content]
             tool_calls = next((c.tool_calls for c in chunks if c.tool_calls), None)
@@ -134,28 +156,28 @@ class Agent:
                 finish_reason=finish_reason,
                 model=model,
             )
+
+        assert isinstance(response, LLMResponse)
         return response
 
     def _handle_response(self, response: LLMResponse, stream: bool) -> str | None:
-        """Procesa respuesta del LLM (imprime, guarda en historial)."""
-        if stream and self.console._live:
-            # El streaming ya se mostró en vivo
-            final_content = self.console.end_streaming()
-            if final_content:
-                self.add_assistant_message(final_content, response.tool_calls)
-                return final_content
-        else:
-            if response.content:
-                self.console.print_assistant(response.content)
-            if response.tool_calls:
-                for tc in response.tool_calls:
-                    self.console.print_tool_call(
-                        tc["function"]["name"],
-                        tc["function"].get("arguments", {}),
-                    )
-            self.add_assistant_message(response.content, response.tool_calls)
-            return response.content
-        return None
+        """Procesa respuesta del LLM (muestra y guarda en historial)."""
+        if stream:
+            # El contenido ya se mostró en vivo en _call_llm
+            final_content = self.console.end_streaming() or response.content
+            self.add_assistant_message(final_content, response.tool_calls)
+            return final_content
+
+        if response.content:
+            self.console.print_assistant(response.content)
+        if response.tool_calls:
+            for tc in response.tool_calls:
+                self.console.print_tool_call(
+                    tc["function"]["name"],
+                    tc["function"].get("arguments", {}),
+                )
+        self.add_assistant_message(response.content, response.tool_calls)
+        return response.content
 
     def _execute_tool_call(self, tool_call: dict) -> None:
         """Ejecuta una tool call y añade resultado al historial."""
@@ -163,7 +185,6 @@ class Agent:
         name = func["name"]
         args_str = func.get("arguments", "{}")
 
-        import json
         try:
             args = json.loads(args_str)
         except json.JSONDecodeError:
@@ -178,7 +199,9 @@ class Agent:
         else:
             self.console.print_tool_result(name, result.error or "Error desconocido", is_error=True)
 
-        self.add_tool_result(tool_call["id"], name, result.content if result.success else result.error or "Error")
+        self.add_tool_result(
+            tool_call["id"], name, result.content if result.success else result.error or "Error"
+        )
 
     def _truncate_context(self) -> None:
         """Trunca mensajes si exceden límite de tokens con resumen inteligente."""
@@ -213,12 +236,13 @@ class Agent:
                 tools=None,
                 stream=False,
             )
+            assert isinstance(response, LLMResponse)
             return response.content
         except Exception as e:
             self.console.print_warning(f"No se pudo generar resumen: {e}")
             return None
 
-    def start_session(self, name: Optional[str] = None) -> str:
+    def start_session(self, name: str | None = None) -> str:
         """Inicia una nueva sesión de conversación."""
         if not self.memory:
             return ""
@@ -231,7 +255,9 @@ class Agent:
         )
         self.session_id = session.id
         self.messages = [Message(role="system", content=self.system_prompt)]
-        self.console.print_success(f"Sesión iniciada: {session.id}" + (f" ({name})" if name else ""))
+        self.console.print_success(
+            f"Sesión iniciada: {session.id}" + (f" ({name})" if name else "")
+        )
         return session.id
 
     def resume_session(self, session_id: str) -> bool:
@@ -248,7 +274,9 @@ class Agent:
         self.messages = self.memory.load_messages(session_id)
         if not self.messages or self.messages[0].role != "system":
             self.messages.insert(0, Message(role="system", content=self.system_prompt))
-        self.console.print_success(f"Sesión reanudada: {session_id}" + (f" ({session.name})" if session.name else ""))
+        self.console.print_success(
+            f"Sesión reanudada: {session_id}" + (f" ({session.name})" if session.name else "")
+        )
         return True
 
     def list_sessions(self, limit: int = 10) -> list:
@@ -259,8 +287,14 @@ class Agent:
 
     def chat(self) -> None:
         """Loop interactivo de chat."""
+        # Iniciar sesión automáticamente si la memoria está habilitada
+        if self.memory and not self.session_id:
+            self.start_session()
+
         self.console.print_info("Modo chat interactivo. Escribe 'exit' o 'quit' para salir.")
-        self.console.print_info("Comandos: /help, /tools, /clear, /config, /sessions, /new, /resume <id>")
+        self.console.print_info(
+            "Comandos: /help, /tools, /clear, /config, /sessions, /new, /resume <id>"
+        )
 
         while True:
             try:
@@ -275,26 +309,26 @@ class Agent:
             # Comandos internos
             if user_input.lower() in ("exit", "quit", "/q"):
                 break
-            elif user_input == "/help":
+            if user_input == "/help":
                 self._print_help()
                 continue
-            elif user_input == "/tools":
+            if user_input == "/tools":
                 self._print_tools()
                 continue
-            elif user_input == "/clear":
+            if user_input == "/clear":
                 self._init_messages()
                 self.console.print_success("Historial limpiado")
                 continue
-            elif user_input == "/config":
+            if user_input == "/config":
                 self._print_config()
                 continue
-            elif user_input == "/sessions":
+            if user_input == "/sessions":
                 self._print_sessions()
                 continue
-            elif user_input == "/new":
+            if user_input == "/new":
                 self.start_session()
                 continue
-            elif user_input.startswith("/resume "):
+            if user_input.startswith("/resume "):
                 session_id = user_input.split(" ", 1)[1].strip()
                 self.resume_session(session_id)
                 continue
@@ -329,11 +363,11 @@ class Agent:
 - Temperatura: `{self.settings.temperature}`
 - Max tokens: `{self.settings.max_tokens}`
 - Directorio: `{self.settings.working_dir}`
-- Memoria: `{'activada' if self.settings.memory_enabled else 'desactivada'}`
+- Memoria: `{"activada" if self.settings.memory_enabled else "desactivada"}`
         """)
 
-    def _print_sessions(self) -> None:
-        sessions = self.list_sessions()
+    def _print_sessions(self, limit: int = 10) -> None:
+        sessions = self.list_sessions(limit)
         if not sessions:
             self.console.print_info("No hay sesiones guardadas")
             return

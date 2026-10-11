@@ -1,8 +1,7 @@
 """Herramienta para ejecutar comandos shell."""
 
-import shlex
 import subprocess
-from typing import Any
+from pathlib import Path
 
 from mi_agente.tools.base import Tool, ToolResult
 
@@ -24,11 +23,13 @@ class ShellCommand(Tool):
         "required": ["command"],
     }
 
-    def execute(self, command: str, cwd: str = ".", timeout: int = 30) -> ToolResult:
+    def execute(self, command: str, cwd: str = ".", timeout: int = 30) -> ToolResult:  # type: ignore[override]
         try:
             work_dir = Path(cwd).expanduser().resolve()
             if not work_dir.exists():
-                return ToolResult(success=False, content="", error=f"Directorio no encontrado: {cwd}")
+                return ToolResult(
+                    success=False, content="", error=f"Directorio no encontrado: {cwd}"
+                )
 
             # Usar shell=True para soportar pipes, redirecciones, etc.
             result = subprocess.run(
@@ -38,6 +39,7 @@ class ShellCommand(Tool):
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                check=False,
             )
 
             output = []
@@ -50,9 +52,8 @@ class ShellCommand(Tool):
             success = result.returncode == 0
             return ToolResult(success=success, content="\n".join(output))
         except subprocess.TimeoutExpired:
-            return ToolResult(success=False, content="", error=f"Timeout ({timeout}s) ejecutando: {command}")
+            return ToolResult(
+                success=False, content="", error=f"Timeout ({timeout}s) ejecutando: {command}"
+            )
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))
-
-
-from pathlib import Path

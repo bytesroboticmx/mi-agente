@@ -3,21 +3,22 @@
 import json
 import sqlite3
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
 
-from mi_agente.config import get_settings
+from mi_agente.config import Settings, get_settings
 from mi_agente.llm import Message
 
 
 @dataclass
 class ConversationSession:
     """Sesión de conversación guardada."""
+
     id: str
-    name: Optional[str]
+    name: str | None
     created_at: datetime
     updated_at: datetime
     message_count: int
@@ -30,9 +31,9 @@ class ConversationSession:
 class ConversationStore:
     """Almacena y recupera conversaciones en SQLite."""
 
-    def __init__(self, db_path: Optional[Path] = None):
-        settings = get_settings()
-        self.db_path = db_path or (settings.memory_dir / "conversations.db")
+    def __init__(self, db_path: Path | None = None, settings: Settings | None = None):
+        self.settings = settings or get_settings()
+        self.db_path = db_path or (self.settings.memory_dir / "conversations.db")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -67,18 +68,20 @@ class ConversationStore:
                 )
             """)
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_messages_session 
+                CREATE INDEX IF NOT EXISTS idx_messages_session
                 ON messages(session_id)
             """)
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_sessions_updated 
+                CREATE INDEX IF NOT EXISTS idx_sessions_updated
                 ON sessions(updated_at DESC)
             """)
 
     @contextmanager
-    def _conn(self):
+    def _conn(self) -> Iterator[sqlite3.Connection]:
         """Context manager para conexión SQLite."""
         conn = sqlite3.connect(self.db_path)
+        # Habilitar foreign keys (necesario para ON DELETE CASCADE)
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         try:
             yield conn
@@ -91,11 +94,11 @@ class ConversationStore:
 
     def create_session(
         self,
-        name: Optional[str] = None,
+        name: str | None = None,
         model: str = "",
         provider: str = "",
         system_prompt: str = "",
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
     ) -> ConversationSession:
         """Crea una nueva sesión."""
         session_id = str(uuid.uuid4())[:8]
@@ -103,10 +106,19 @@ class ConversationStore:
 
         with self._conn() as conn:
             conn.execute(
-                """INSERT INTO sessions 
+                """INSERT INTO sessions
                    (id, name, created_at, updated_at, model, provider, system_prompt, metadata)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, name, now, now, model, provider, system_prompt, json.dumps(metadata or {}))
+                (
+                    session_id,
+                    name,
+                    now,
+                    now,
+                    model,
+                    provider,
+                    system_prompt,
+                    json.dumps(metadata or {}),
+                ),
             )
 
         return ConversationSession(
@@ -130,7 +142,7 @@ class ConversationStore:
             # Insertar nuevos
             for msg in messages:
                 conn.execute(
-                    """INSERT INTO messages 
+                    """INSERT INTO messages
                        (session_id, role, content, tool_calls, tool_call_id, name, created_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (
@@ -141,7 +153,7 @@ class ConversationStore:
                         msg.tool_call_id,
                         msg.name,
                         datetime.now().isoformat(),
-                    )
+                    ),
                 )
 
             # Actualizar contador y timestamp
@@ -150,12 +162,10 @@ class ConversationStore:
                 (len(messages), datetime.now().isoformat(), session_id),
             )
 
-    def load_session(self, session_id: str) -> Optional[ConversationSession]:
+    def load_session(self, session_id: str) -> ConversationSession | None:
         """Carga una sesión por ID."""
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM sessions WHERE id = ?", (session_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
 
             if not row:
                 return None
@@ -252,9 +262,7 @@ class ContextManager:
 
     def create_summary_prompt(self, messages: list[Message]) -> str:
         """Crea prompt para resumir conversación."""
-        conversation = "\n".join(
-            f"{m.role}: {m.content or ''}" for m in messages if m.content
-        )
+        conversation = "\n".join(f"{m.role}: {m.content or ''}" for m in messages if m.content)
         return (
             "Resume la siguiente conversación manteniendo los puntos clave, "
             "decisiones importantes, y cualquier información relevante para "
@@ -274,10 +282,7 @@ class ContextManager:
         system_msg = messages[0] if messages and messages[0].role == "system" else None
         recent = messages[-(keep_last):]
 
-        summary_msg = Message(
-            role="system",
-            content=f"[Resumen de conversación previa]\n{summary}"
-        )
+        summary_msg = Message(role="system", content=f"[Resumen de conversación previa]\n{summary}")
 
         result = []
         if system_msg:

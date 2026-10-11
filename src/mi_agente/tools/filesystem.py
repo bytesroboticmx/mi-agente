@@ -1,7 +1,6 @@
 """Herramientas de sistema de archivos."""
 
 from pathlib import Path
-from typing import Any
 
 from mi_agente.tools.base import Tool, ToolResult
 
@@ -16,12 +15,16 @@ class ReadFile(Tool):
         "properties": {
             "path": {"type": "string", "description": "Ruta del archivo a leer"},
             "offset": {"type": "integer", "description": "Línea inicial (0-indexed)", "default": 0},
-            "limit": {"type": "integer", "description": "Número de líneas a leer (0 = todo)", "default": 0},
+            "limit": {
+                "type": "integer",
+                "description": "Número de líneas a leer (0 = todo)",
+                "default": 0,
+            },
         },
         "required": ["path"],
     }
 
-    def execute(self, path: str, offset: int = 0, limit: int = 0) -> ToolResult:
+    def execute(self, path: str, offset: int = 0, limit: int = 0) -> ToolResult:  # type: ignore[override]
         try:
             file_path = Path(path).expanduser().resolve()
             if not file_path.exists():
@@ -39,11 +42,16 @@ class ReadFile(Tool):
 
             result = "\n".join(lines)
             if offset > 0 or limit > 0:
-                result += f"\n\n[Mostrando líneas {offset}-{offset + len(lines)} de {len(content.splitlines())}]"
+                total = len(content.splitlines())
+                result += f"\n\n[Mostrando líneas {offset}-{offset + len(lines)} de {total}]"
 
             return ToolResult(success=True, content=result)
         except UnicodeDecodeError:
-            return ToolResult(success=False, content="", error=f"Archivo binario o codificación no soportada: {path}")
+            return ToolResult(
+                success=False,
+                content="",
+                error=f"Archivo binario o codificación no soportada: {path}",
+            )
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))
 
@@ -59,12 +67,16 @@ class WriteFile(Tool):
         "properties": {
             "path": {"type": "string", "description": "Ruta del archivo a escribir"},
             "content": {"type": "string", "description": "Contenido a escribir"},
-            "append": {"type": "boolean", "description": "Añadir al final en lugar de sobrescribir", "default": False},
+            "append": {
+                "type": "boolean",
+                "description": "Añadir al final en lugar de sobrescribir",
+                "default": False,
+            },
         },
         "required": ["path", "content"],
     }
 
-    def execute(self, path: str, content: str, append: bool = False) -> ToolResult:
+    def execute(self, path: str, content: str, append: bool = False) -> ToolResult:  # type: ignore[override]
         try:
             file_path = Path(path).expanduser().resolve()
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,17 +100,29 @@ class ListDir(Tool):
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Ruta del directorio", "default": "."},
-            "recursive": {"type": "boolean", "description": "Listar recursivamente", "default": False},
-            "show_hidden": {"type": "boolean", "description": "Mostrar archivos ocultos", "default": False},
+            "recursive": {
+                "type": "boolean",
+                "description": "Listar recursivamente",
+                "default": False,
+            },
+            "show_hidden": {
+                "type": "boolean",
+                "description": "Mostrar archivos ocultos",
+                "default": False,
+            },
         },
         "required": [],
     }
 
-    def execute(self, path: str = ".", recursive: bool = False, show_hidden: bool = False) -> ToolResult:
+    def execute(  # type: ignore[override]
+        self, path: str = ".", recursive: bool = False, show_hidden: bool = False
+    ) -> ToolResult:
         try:
             dir_path = Path(path).expanduser().resolve()
             if not dir_path.exists():
-                return ToolResult(success=False, content="", error=f"Directorio no encontrado: {path}")
+                return ToolResult(
+                    success=False, content="", error=f"Directorio no encontrado: {path}"
+                )
             if not dir_path.is_dir():
                 return ToolResult(success=False, content="", error=f"No es un directorio: {path}")
 
@@ -136,12 +160,14 @@ class Glob(Tool):
         "required": ["pattern"],
     }
 
-    def execute(self, pattern: str, root: str = ".") -> ToolResult:
+    def execute(self, pattern: str, root: str = ".") -> ToolResult:  # type: ignore[override]
         try:
             root_path = Path(root).expanduser().resolve()
             matches = list(root_path.rglob(pattern))
             rel_paths = [str(m.relative_to(root_path)) for m in matches]
-            return ToolResult(success=True, content="\n".join(rel_paths) if rel_paths else "(sin coincidencias)")
+            return ToolResult(
+                success=True, content="\n".join(rel_paths) if rel_paths else "(sin coincidencias)"
+            )
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))
 
@@ -155,24 +181,28 @@ class Grep(Tool):
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "Patrón de búsqueda (regex)"},
-            "path": {"type": "string", "description": "Archivo o directorio a buscar", "default": "."},
+            "path": {
+                "type": "string",
+                "description": "Archivo o directorio a buscar",
+                "default": ".",
+            },
             "include": {"type": "string", "description": "Patrón de archivos a incluir (glob)"},
         },
         "required": ["pattern"],
     }
 
-    def execute(self, pattern: str, path: str = ".", include: str | None = None) -> ToolResult:
+    def execute(self, pattern: str, path: str = ".", include: str | None = None) -> ToolResult:  # type: ignore[override]
         try:
             import re
+
             search_path = Path(path).expanduser().resolve()
 
             if search_path.is_file():
                 files = [search_path]
+            elif include:
+                files = list(search_path.rglob(include))
             else:
-                if include:
-                    files = list(search_path.rglob(include))
-                else:
-                    files = [f for f in search_path.rglob("*") if f.is_file()]
+                files = [f for f in search_path.rglob("*") if f.is_file()]
 
             regex = re.compile(pattern)
             results = []
@@ -189,6 +219,8 @@ class Grep(Tool):
                 except Exception:
                     continue
 
-            return ToolResult(success=True, content="\n".join(results) if results else "(sin coincidencias)")
+            return ToolResult(
+                success=True, content="\n".join(results) if results else "(sin coincidencias)"
+            )
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))

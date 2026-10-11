@@ -5,12 +5,12 @@ description = "Agente CLI inteligente para terminal Linux"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "Tu Nombre", email = "tu@email.com"}]
+authors = [{name = "Dr. Aldo Gonzalez Vazquez", email = "bytesroboticmx@gmail.com"}]
 dependencies = [
     "typer[all]>=0.12",
     "openai>=1.30",
     "anthropic>=0.25",
-    "pydantic-settings>=2.3",
+    "pydantic>=2.7",
     "rich>=13.7",
     "python-dotenv>=1.0",
     "httpx>=0.27",
@@ -24,7 +24,6 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
-ollama = ["ollama>=0.3"]
 
 [project.scripts]
 mi-agente = "mi_agente.main:app"
@@ -37,8 +36,36 @@ build-backend = "setuptools.build_meta"
 line-length = 100
 target-version = "py311"
 lint.select = ["E", "F", "I", "UP", "B", "C4", "PT", "T20", "W", "N", "S", "RET", "TRY", "FURB", "LOG", "PL", "PLE", "PLR", "PTH", "ERA", "PD", "PGH", "TCH", "TID", "ARG", "FA", "FBT", "FURB", "ISC", "ICN", "PIE", "TID", "TRY"]
-lint.ignore = ["S101", "PLR0913", "PLR0917", "TRY003", "T201", "T203"]
+lint.ignore = [
+    "S101",
+    "PLR0913",
+    "PLR0917",
+    "TRY003",
+    "T201",
+    "T203",
+    # Parámetros booleanos y argumentos usados por el framework CLI / kwargs
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    "ARG001",
+    "ARG002",
+    # Imports perezosos deliberados (evitar dependencias opcionales/circularidad)
+    "PLC0415",
+    # Valores "mágicos" aceptados en configuración y umbrales
+    "PLR2004",
+    "TRY300",
+    # Manejo de errores best-effort (historial, archivos binarios)
+    "S110",
+    "S112",
+    # subprocess con shell=True es intencional en la herramienta `shell`
+    "S602",
+    "S603",
+    "S607",
+]
 format.quote-style = "double"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PT011", "S105", "S106", "S603", "S607"]
 
 [tool.mypy]
 python_version = "3.11"

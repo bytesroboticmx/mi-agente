@@ -1,8 +1,5 @@
 """Tests para configuración."""
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from mi_agente.config import Settings, _load_env_file, _parse_value, get_settings, reload_settings
@@ -25,17 +22,17 @@ def test_settings_validation():
     # Temperatura fuera de rango
     with pytest.raises(ValueError):
         Settings(temperature=3.0)
-    
+
     with pytest.raises(ValueError):
         Settings(temperature=-0.5)
-    
+
     # Max tokens
     with pytest.raises(ValueError):
         Settings(max_tokens=0)
-    
+
     with pytest.raises(ValueError):
         Settings(max_tokens=200000)
-    
+
     # Provider inválido
     with pytest.raises(ValueError):
         Settings(llm_provider="invalid")
@@ -65,7 +62,7 @@ API_KEY=sk-test
 TEMPERATURE=0.5
 MAX_TOKENS=2000
 """)
-    
+
     data = _load_env_file(env_file)
     assert data["LLM_PROVIDER"] == "anthropic"
     assert data["MODEL_NAME"] == "claude-3"
@@ -82,11 +79,11 @@ LLM_PROVIDER=ollama
 MODEL_NAME=llama3
 TEMPERATURE=0.3
 """)
-    
+
     monkeypatch.chdir(tmp_path)
     reload_settings()
     s = get_settings()
-    
+
     assert s.llm_provider == "ollama"
     assert s.model_name == "llama3"
     assert s.temperature == 0.3
@@ -96,7 +93,7 @@ def test_secret_str_api_key():
     """Verifica manejo de API key secreta."""
     s = Settings(api_key="sk-secret")
     assert s.get_api_key() == "sk-secret"
-    
+
     s2 = Settings(api_key="")
     assert s2.get_api_key() == ""
 
